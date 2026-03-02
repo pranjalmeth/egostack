@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ego-hand-pipeline"
+version = "0.1.0"
+description = "Pipeline for egocentric hand detection, depth estimation, and trajectory mapping"
+requires-python = ">=3.10"
+dependencies = [
+    "yt-dlp",
+    "opencv-python",
+    "mediapipe",
+    "torch",
+    "timm",
+    "numpy",
+    "pyyaml",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-mock"]
+
+[project.scripts]
+ego-hand-pipeline = "ego_hand_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

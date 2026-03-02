@@ -1,0 +1,28 @@
+download:
+  resolution: 720
+  format: mp4
+  output_dir: data/raw
+
+detection:
+  confidence_threshold: 0.7
+  model_complexity: 1        # 0=lite, 1=full
+
+clipping:
+  min_duration: 1.0           # seconds
+  merge_gap: 0.5              # seconds — merge segments closer than this
+  output_dir: data/clips
+
+depth:
+  model: depth_anything_v2     # or "midas"
+  sample_rate: 30              # process every Nth frame (1 = all, 30 = ~1/sec)
+  output_dir: data/depth
+  save_visualization: true
+
+trajectories:
+  smooth: true                 # apply smoothing filter
+  compute_velocity: true
+  compute_acceleration: true
+  output_dir: data/trajectories
+
+export:
+  formats: [json, csv]
