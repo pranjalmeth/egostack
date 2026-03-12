@@ -50,6 +50,47 @@ class ExportConfig:
 
 
 @dataclass
+class HandPoseConfig:
+    """HaMeR 3D hand pose estimation settings."""
+    enabled: bool = True
+    sample_rate: int = 1
+    model_path: str | None = None
+    output_dir: str = "data/hand_poses"
+
+
+@dataclass
+class ObjectDetectionConfig:
+    """GroundingDINO open-vocabulary object detection settings."""
+    enabled: bool = True
+    sample_rate: int = 30
+    box_threshold: float = 0.3
+    text_threshold: float = 0.25
+    text_prompts: list[str] | None = None
+    model_path: str | None = None
+    output_dir: str = "data/objects"
+
+
+@dataclass
+class SegmentationConfig:
+    """SAM2 segmentation settings."""
+    enabled: bool = True
+    sample_rate: int = 1
+    model_size: str = "small"  # tiny, small, base_plus, large
+    model_path: str | None = None
+    output_dir: str = "data/segmentation"
+    save_masks: bool = True
+
+
+@dataclass
+class LeRobotConfig:
+    """LeRobot dataset export settings."""
+    enabled: bool = True
+    dataset_name: str = "ego_hand_manipulation"
+    task_description: str = "manipulation"
+    output_dir: str = "data/lerobot"
+
+
+@dataclass
 class PipelineConfig:
     download: DownloadConfig = field(default_factory=DownloadConfig)
     detection: DetectionConfig = field(default_factory=DetectionConfig)
@@ -57,6 +98,10 @@ class PipelineConfig:
     depth: DepthConfig = field(default_factory=DepthConfig)
     trajectories: TrajectoryConfig = field(default_factory=TrajectoryConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
+    hand_pose: HandPoseConfig = field(default_factory=HandPoseConfig)
+    object_detection: ObjectDetectionConfig = field(default_factory=ObjectDetectionConfig)
+    segmentation: SegmentationConfig = field(default_factory=SegmentationConfig)
+    lerobot: LeRobotConfig = field(default_factory=LeRobotConfig)
     base_dir: str = "."
 
     def resolve_path(self, relative: str) -> Path:
@@ -94,6 +139,10 @@ def load_config(path: str | Path | None = None, overrides: dict | None = None) -
         depth=_build_section(DepthConfig, raw.get("depth")),
         trajectories=_build_section(TrajectoryConfig, raw.get("trajectories")),
         export=_build_section(ExportConfig, raw.get("export")),
+        hand_pose=_build_section(HandPoseConfig, raw.get("hand_pose")),
+        object_detection=_build_section(ObjectDetectionConfig, raw.get("object_detection")),
+        segmentation=_build_section(SegmentationConfig, raw.get("segmentation")),
+        lerobot=_build_section(LeRobotConfig, raw.get("lerobot")),
         base_dir=raw.get("base_dir", "."),
     )
     return cfg
