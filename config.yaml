@@ -26,3 +26,31 @@ trajectories:
 
 export:
   formats: [json, csv]
+
+# --- Enhanced SOTA robotics stages ---
+
+hand_pose:
+  enabled: true
+  sample_rate: 1                 # process every Nth frame
+  output_dir: data/hand_poses
+
+object_detection:
+  enabled: true
+  sample_rate: 30                # process every Nth frame (~1/sec at 30fps)
+  box_threshold: 0.3
+  text_threshold: 0.25
+  # text_prompts: [cup, bottle, tool, phone]  # null = use defaults
+  output_dir: data/objects
+
+segmentation:
+  enabled: true
+  sample_rate: 1
+  model_size: small              # tiny, small, base_plus, large
+  save_masks: true
+  output_dir: data/segmentation
+
+lerobot:
+  enabled: true
+  dataset_name: ego_hand_manipulation
+  task_description: manipulation
+  output_dir: data/lerobot

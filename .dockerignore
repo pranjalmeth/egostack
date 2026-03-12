@@ -1,0 +1,9 @@
+.git
+__pycache__
+*.pyc
+data/
+models/
+*.egg-info
+.pytest_cache
+.tox
+.venv

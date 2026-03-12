@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ego-hand-pipeline"
-version = "0.1.0"
-description = "Pipeline for egocentric hand detection, depth estimation, and trajectory mapping"
+version = "0.2.0"
+description = "SOTA egocentric hand pipeline for robotics AI training data generation"
 requires-python = ">=3.10"
 dependencies = [
     "yt-dlp",
@@ -20,6 +20,25 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-mock"]
+# SOTA robotics models (install individually as needed)
+hamer = ["hamer"]
+sam2 = ["sam2"]
+groundingdino = ["groundingdino"]
+transformers = ["transformers>=4.36.0", "Pillow"]
+lerobot = ["pyarrow>=14.0", "lerobot"]
+# GCP Cloud Batch deployment
+cloud = [
+    "google-cloud-storage",
+    "google-cloud-batch",
+]
+# All enhanced pipeline dependencies
+all = [
+    "transformers>=4.36.0",
+    "Pillow",
+    "pyarrow>=14.0",
+    "google-cloud-storage",
+    "google-cloud-batch",
+]
 
 [project.scripts]
 ego-hand-pipeline = "ego_hand_pipeline.cli:main"
