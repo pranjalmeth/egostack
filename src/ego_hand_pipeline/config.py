@@ -91,6 +91,34 @@ class LeRobotConfig:
 
 
 @dataclass
+class PreprocessingConfig:
+    """Video preprocessing / resolution standardization settings."""
+    enabled: bool = True
+    target_width: int = 640    # 480p — ideal for robotics training data
+    target_height: int = 480
+    target_fps: int | None = None  # None = keep original fps
+    output_dir: str = "data/preprocessed"
+
+
+@dataclass
+class SceneAnnotationConfig:
+    """Scene captioning / annotation settings."""
+    enabled: bool = True
+    sample_rate: int = 30        # annotate every Nth frame (~1/sec at 30fps)
+    model_name: str = "rule_based"  # "blip2", "instructblip", or "rule_based"
+    output_dir: str = "data/scene_annotations"
+
+
+@dataclass
+class TestModeConfig:
+    """Test / benchmark mode settings."""
+    enabled: bool = False
+    max_frames: int = 900         # ~30 seconds at 30fps
+    render_samples: bool = True   # generate annotated sample videos
+    sample_output_dir: str = "data/samples"
+
+
+@dataclass
 class PipelineConfig:
     download: DownloadConfig = field(default_factory=DownloadConfig)
     detection: DetectionConfig = field(default_factory=DetectionConfig)
@@ -102,6 +130,9 @@ class PipelineConfig:
     object_detection: ObjectDetectionConfig = field(default_factory=ObjectDetectionConfig)
     segmentation: SegmentationConfig = field(default_factory=SegmentationConfig)
     lerobot: LeRobotConfig = field(default_factory=LeRobotConfig)
+    preprocessing: PreprocessingConfig = field(default_factory=PreprocessingConfig)
+    scene_annotation: SceneAnnotationConfig = field(default_factory=SceneAnnotationConfig)
+    test_mode: TestModeConfig = field(default_factory=TestModeConfig)
     base_dir: str = "."
 
     def resolve_path(self, relative: str) -> Path:
@@ -143,6 +174,9 @@ def load_config(path: str | Path | None = None, overrides: dict | None = None) -
         object_detection=_build_section(ObjectDetectionConfig, raw.get("object_detection")),
         segmentation=_build_section(SegmentationConfig, raw.get("segmentation")),
         lerobot=_build_section(LeRobotConfig, raw.get("lerobot")),
+        preprocessing=_build_section(PreprocessingConfig, raw.get("preprocessing")),
+        scene_annotation=_build_section(SceneAnnotationConfig, raw.get("scene_annotation")),
+        test_mode=_build_section(TestModeConfig, raw.get("test_mode")),
         base_dir=raw.get("base_dir", "."),
     )
     return cfg

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ego-hand-pipeline"
-version = "0.2.0"
+version = "0.3.0"
 description = "SOTA egocentric hand pipeline for robotics AI training data generation"
 requires-python = ">=3.10"
 dependencies = [
@@ -25,6 +25,7 @@ hamer = ["hamer"]
 sam2 = ["sam2"]
 groundingdino = ["groundingdino"]
 transformers = ["transformers>=4.36.0", "Pillow"]
+vlm = ["transformers>=4.36.0", "Pillow", "accelerate"]
 lerobot = ["pyarrow>=14.0", "lerobot"]
 # GCP Cloud Batch deployment
 cloud = [

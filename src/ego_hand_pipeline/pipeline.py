@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import cv2
@@ -23,6 +25,24 @@ def _get_fps(video_path: Path) -> float:
     return fps
 
 
+def _is_local_file(input_str: str) -> bool:
+    """Determine if the input is a local file path or a URL."""
+    p = Path(input_str)
+    if p.exists() and p.is_file():
+        return True
+    # URL patterns
+    if input_str.startswith(("http://", "https://", "www.")):
+        return False
+    # Could be a relative path that doesn't exist yet
+    if p.suffix in (".mp4", ".avi", ".mkv", ".mov", ".webm", ".flv"):
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Individual pipeline stages
+# ---------------------------------------------------------------------------
+
 def run_download(url: str, config: PipelineConfig) -> Path:
     """Download a single video."""
     output_dir = config.resolve_path(config.download.output_dir)
@@ -31,6 +51,27 @@ def run_download(url: str, config: PipelineConfig) -> Path:
         output_dir=output_dir,
         resolution=config.download.resolution,
         format=config.download.format,
+    )
+
+
+def run_preprocess(
+    video_path: Path,
+    config: PipelineConfig,
+    max_frames: int | None = None,
+) -> Path:
+    """Preprocess video to ideal resolution."""
+    from .video_preprocessor import preprocess_video
+
+    prep = config.preprocessing
+    output_dir = config.resolve_path(prep.output_dir)
+
+    return preprocess_video(
+        video_path,
+        output_dir=output_dir,
+        target_width=prep.target_width,
+        target_height=prep.target_height,
+        target_fps=prep.target_fps,
+        max_frames=max_frames,
     )
 
 
@@ -147,17 +188,24 @@ def run_export(
 
 
 def run_pipeline(config: PipelineConfig, urls: list[str]) -> None:
-    """Run the full pipeline: download -> detect -> clip -> depth -> trajectories -> export.
-
-    Args:
-        config: Pipeline configuration.
-        urls: List of YouTube URLs to process.
-    """
+    """Run the full pipeline: download -> detect -> clip -> depth -> trajectories -> export."""
     for url in tqdm(urls, desc="Processing videos"):
         print(f"\n{'='*60}")
-        print(f"Downloading: {url}")
-        video_path = run_download(url, config)
-        print(f"  Saved: {video_path}")
+
+        # Support local files
+        if _is_local_file(url):
+            video_path = Path(url)
+            print(f"Using local file: {video_path}")
+        else:
+            print(f"Downloading: {url}")
+            video_path = run_download(url, config)
+            print(f"  Saved: {video_path}")
+
+        # Preprocess to standard resolution
+        if config.preprocessing.enabled:
+            print("Preprocessing video to standard resolution...")
+            video_path = run_preprocess(video_path, config)
+            print(f"  Preprocessed: {video_path}")
 
         print("Detecting hands...")
         detections = run_detect(video_path, config)
@@ -281,6 +329,56 @@ def run_segmentation(
     )
 
 
+def run_scene_annotation(
+    video_path: Path,
+    hand_detections: list[FrameDetection] | None,
+    object_detections: list | None,
+    config: PipelineConfig,
+) -> list:
+    """Run scene annotation / captioning."""
+    from .scene_annotator import annotate_scenes
+
+    sa = config.scene_annotation
+    output_dir = config.resolve_path(sa.output_dir)
+
+    return annotate_scenes(
+        video_path,
+        hand_detections=hand_detections,
+        object_detections=object_detections,
+        sample_rate=sa.sample_rate,
+        model_name=sa.model_name,
+        output_dir=output_dir,
+    )
+
+
+def run_sample_render(
+    video_path: Path,
+    config: PipelineConfig,
+    hand_detections: list | None = None,
+    object_detections: list | None = None,
+    depth_frames: list | None = None,
+    segmentations: list | None = None,
+    scene_annotations: list | None = None,
+    max_frames: int | None = None,
+) -> Path:
+    """Render a sample visualization video (test/benchmark mode)."""
+    from .sample_renderer import render_sample_video
+
+    output_dir = config.resolve_path(config.test_mode.sample_output_dir)
+    output_path = output_dir / f"{video_path.stem}_sample.mp4"
+
+    return render_sample_video(
+        video_path,
+        output_path,
+        hand_detections=hand_detections,
+        object_detections=object_detections,
+        depth_frames=depth_frames,
+        segmentations=segmentations,
+        scene_annotations=scene_annotations,
+        max_frames=max_frames,
+    )
+
+
 def run_lerobot_export(
     episodes: list[dict],
     config: PipelineConfig,
@@ -298,13 +396,31 @@ def run_lerobot_export(
     return export_lerobot(episodes, output_dir)
 
 
+def _resolve_input(input_str: str, config: PipelineConfig) -> Path:
+    """Resolve an input string to a video file path.
+
+    Supports:
+    - Local file paths (absolute or relative)
+    - YouTube URLs (downloads first)
+    """
+    if _is_local_file(input_str):
+        path = Path(input_str)
+        if not path.exists():
+            raise FileNotFoundError(f"Local video file not found: {path}")
+        return path
+    else:
+        return run_download(input_str, config)
+
+
 def run_pipeline_enhanced(
     config: PipelineConfig,
     urls: list[str],
     enable_hand_pose: bool = True,
     enable_object_detection: bool = True,
     enable_segmentation: bool = True,
+    enable_scene_annotation: bool = True,
     export_format: str = "lerobot",
+    test_mode: bool = False,
     hand_pose_output_dir: str | None = None,
     object_output_dir: str | None = None,
     segmentation_output_dir: str | None = None,
@@ -313,16 +429,22 @@ def run_pipeline_enhanced(
     """Run the enhanced SOTA robotics pipeline.
 
     Extended pipeline:
-        download → detect → clip → depth → hand_pose → objects → segmentation
-        → trajectories → export (LeRobot / JSON / CSV)
+        [download/load] → preprocess → detect → clip → depth → hand_pose
+        → objects → segmentation → scene_annotation → trajectories
+        → export (LeRobot / JSON / CSV)
+
+    Supports both YouTube URLs and local video files as input.
+    Independent stages (hand_pose, object_detection) run in parallel.
 
     Args:
         config: Pipeline configuration.
-        urls: List of YouTube URLs to process.
+        urls: List of YouTube URLs or local file paths to process.
         enable_hand_pose: Run HaMeR 3D hand pose estimation.
         enable_object_detection: Run GroundingDINO object detection.
         enable_segmentation: Run SAM2 segmentation.
+        enable_scene_annotation: Run scene captioning.
         export_format: "lerobot", "json", "csv", or "all".
+        test_mode: Enable test mode (limited frames, sample video output).
         hand_pose_output_dir: Override for hand pose output directory.
         object_output_dir: Override for object detection output directory.
         segmentation_output_dir: Override for segmentation output directory.
@@ -330,63 +452,134 @@ def run_pipeline_enhanced(
     """
     all_episodes = []
 
-    for url in tqdm(urls, desc="Processing videos"):
-        print(f"\n{'='*60}")
-        print(f"Downloading: {url}")
-        video_path = run_download(url, config)
-        print(f"  Saved: {video_path}")
+    # Test mode settings
+    is_test = test_mode or config.test_mode.enabled
+    max_frames = config.test_mode.max_frames if is_test else None
 
+    if is_test:
+        print(f"TEST MODE: processing max {max_frames} frames per video")
+        print(f"  Sample videos will be rendered to {config.test_mode.sample_output_dir}")
+
+    timings: dict[str, list[float]] = {}
+
+    for input_str in tqdm(urls, desc="Processing videos"):
+        print(f"\n{'='*60}")
+
+        # --- Resolve input (local file or URL) ---
+        t0 = time.time()
+        if _is_local_file(input_str):
+            video_path = Path(input_str)
+            if not video_path.exists():
+                print(f"  ERROR: File not found: {video_path}")
+                continue
+            print(f"Using local file: {video_path}")
+        else:
+            print(f"Downloading: {input_str}")
+            video_path = run_download(input_str, config)
+            print(f"  Saved: {video_path}")
+        _record_timing(timings, "download/load", time.time() - t0)
+
+        # --- Preprocess to standard resolution ---
+        if config.preprocessing.enabled:
+            t0 = time.time()
+            print(f"Preprocessing to {config.preprocessing.target_width}x{config.preprocessing.target_height}...")
+            video_path = run_preprocess(video_path, config, max_frames=max_frames)
+            print(f"  Preprocessed: {video_path}")
+            _record_timing(timings, "preprocess", time.time() - t0)
+
+        # --- Hand detection ---
+        t0 = time.time()
         print("Detecting hands...")
         detections = run_detect(video_path, config)
         hand_frames = sum(1 for d in detections if d.detected)
         print(f"  Hands detected in {hand_frames}/{len(detections)} frames")
+        _record_timing(timings, "hand_detection", time.time() - t0)
 
+        # --- Clip extraction ---
+        t0 = time.time()
         print("Extracting clips...")
         clips = run_clip(video_path, detections, config)
         print(f"  Extracted {len(clips)} clips")
+        _record_timing(timings, "clip_extraction", time.time() - t0)
 
         for clip in tqdm(clips, desc="Processing clips", leave=False):
             print(f"\n  Processing clip: {clip.clip_id}")
 
-            # --- Core stages (same as original) ---
+            # --- Core stages ---
+            t0 = time.time()
             print("    Detecting hands in clip...")
             clip_detections = run_detect(clip.path, config)
+            _record_timing(timings, "clip_hand_detection", time.time() - t0)
 
+            t0 = time.time()
             print("    Estimating depth...")
             depth_frames = run_depth(clip.path, config)
             depth_video = run_depth_video(clip.path, depth_frames, config)
             print(f"    Depth video: {depth_video}")
+            _record_timing(timings, "depth_estimation", time.time() - t0)
 
-            # --- Enhanced stages ---
+            # --- Enhanced stages (parallel where possible) ---
             hand_poses = None
-            if enable_hand_pose:
-                print("    Estimating 3D hand poses (HaMeR)...")
-                hand_poses = run_hand_poses(clip.path, clip_detections, config)
-                print(f"    Hand poses: {len(hand_poses)} frames")
-
             obj_detections = None
-            if enable_object_detection:
-                print("    Detecting objects (GroundingDINO)...")
-                obj_detections = run_object_detection(clip.path, config)
-                total_objects = sum(len(f.objects) for f in obj_detections)
-                print(f"    Objects: {total_objects} detections across {len(obj_detections)} frames")
+            scene_annotations = None
 
+            # Hand pose and object detection are independent — run in parallel
+            parallel_tasks = {}
+
+            if enable_hand_pose:
+                parallel_tasks["hand_pose"] = (
+                    run_hand_poses, (clip.path, clip_detections, config)
+                )
+            if enable_object_detection:
+                parallel_tasks["object_detection"] = (
+                    run_object_detection, (clip.path, config)
+                )
+
+            if parallel_tasks:
+                t0 = time.time()
+                results = _run_parallel(parallel_tasks)
+                hand_poses = results.get("hand_pose")
+                obj_detections = results.get("object_detection")
+
+                if hand_poses is not None:
+                    print(f"    Hand poses: {len(hand_poses)} frames")
+                    _record_timing(timings, "hand_pose", time.time() - t0)
+                if obj_detections is not None:
+                    total_objects = sum(len(f.objects) for f in obj_detections)
+                    print(f"    Objects: {total_objects} detections across {len(obj_detections)} frames")
+                    _record_timing(timings, "object_detection", time.time() - t0)
+
+            # Segmentation depends on object detections
             segmentations = None
             if enable_segmentation:
+                t0 = time.time()
                 print("    Segmenting (SAM2)...")
                 segmentations = run_segmentation(
                     clip.path, clip_detections, obj_detections, config
                 )
                 total_masks = sum(len(f.masks) for f in segmentations)
                 print(f"    Segmentation: {total_masks} masks across {len(segmentations)} frames")
+                _record_timing(timings, "segmentation", time.time() - t0)
+
+            # Scene annotation
+            if enable_scene_annotation and config.scene_annotation.enabled:
+                t0 = time.time()
+                print("    Annotating scenes...")
+                scene_annotations = run_scene_annotation(
+                    clip.path, clip_detections, obj_detections, config
+                )
+                print(f"    Scene annotations: {len(scene_annotations)} frames")
+                _record_timing(timings, "scene_annotation", time.time() - t0)
 
             # --- Trajectories ---
+            t0 = time.time()
             print("    Computing trajectories...")
             traj_data = run_trajectories(
                 clip.path, clip_detections, depth_frames, clip, config
             )
             traj_video = run_trajectory_video(clip.path, clip_detections, config)
             print(f"    Trajectory video: {traj_video}")
+            _record_timing(timings, "trajectories", time.time() - t0)
 
             # --- Traditional export ---
             if export_format in ("json", "csv", "all"):
@@ -395,6 +588,22 @@ def run_pipeline_enhanced(
                 for p in exported:
                     print(f"      {p}")
 
+            # --- Test mode: render sample video ---
+            if is_test and config.test_mode.render_samples:
+                t0 = time.time()
+                print("    Rendering sample visualization video...")
+                sample_path = run_sample_render(
+                    clip.path, config,
+                    hand_detections=clip_detections,
+                    object_detections=obj_detections,
+                    depth_frames=depth_frames,
+                    segmentations=segmentations,
+                    scene_annotations=scene_annotations,
+                    max_frames=max_frames,
+                )
+                print(f"    Sample video: {sample_path}")
+                _record_timing(timings, "sample_render", time.time() - t0)
+
             # --- Collect episode for LeRobot export ---
             all_episodes.append({
                 "traj_data": traj_data,
@@ -402,17 +611,75 @@ def run_pipeline_enhanced(
                 "hand_poses": hand_poses,
                 "object_detections": obj_detections,
                 "segmentations": segmentations,
+                "scene_annotations": scene_annotations,
                 "video_path": clip.path,
             })
 
     # --- LeRobot export ---
     if export_format in ("lerobot", "all") and all_episodes:
+        t0 = time.time()
         print(f"\n{'='*60}")
         print("Exporting LeRobot dataset...")
         dataset_path = run_lerobot_export(
             all_episodes, config, output_dir=lerobot_output_dir
         )
         print(f"  Dataset: {dataset_path}")
+        _record_timing(timings, "lerobot_export", time.time() - t0)
 
     print(f"\n{'='*60}")
     print(f"Enhanced pipeline complete. Processed {len(all_episodes)} episodes.")
+
+    # --- Print timing summary (always in test mode, optional otherwise) ---
+    if is_test and timings:
+        _print_timing_summary(timings)
+
+
+def _run_parallel(tasks: dict[str, tuple]) -> dict:
+    """Run multiple pipeline stages in parallel using threads.
+
+    Args:
+        tasks: dict mapping name -> (function, args_tuple)
+
+    Returns:
+        dict mapping name -> result
+    """
+    results = {}
+
+    with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
+        futures = {}
+        for name, (func, args) in tasks.items():
+            future = executor.submit(func, *args)
+            futures[future] = name
+
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                results[name] = future.result()
+            except Exception as e:
+                print(f"    WARNING: {name} failed: {e}")
+                results[name] = None
+
+    return results
+
+
+def _record_timing(timings: dict[str, list[float]], stage: str, elapsed: float) -> None:
+    """Record timing for a pipeline stage."""
+    timings.setdefault(stage, []).append(elapsed)
+
+
+def _print_timing_summary(timings: dict[str, list[float]]) -> None:
+    """Print a timing summary table."""
+    print(f"\n{'='*60}")
+    print("TIMING SUMMARY")
+    print(f"{'Stage':<25} {'Count':>6} {'Total':>10} {'Avg':>10}")
+    print(f"{'-'*25} {'-'*6} {'-'*10} {'-'*10}")
+
+    total_time = 0.0
+    for stage, times in timings.items():
+        total = sum(times)
+        avg = total / len(times)
+        total_time += total
+        print(f"{stage:<25} {len(times):>6} {total:>9.2f}s {avg:>9.2f}s")
+
+    print(f"{'-'*25} {'-'*6} {'-'*10} {'-'*10}")
+    print(f"{'TOTAL':<25} {'':>6} {total_time:>9.2f}s")
