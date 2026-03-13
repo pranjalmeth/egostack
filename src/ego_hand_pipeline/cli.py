@@ -122,6 +122,38 @@ def _build_parser() -> argparse.ArgumentParser:
     batch_parser.add_argument("--dry-run", action="store_true", help="Generate job spec without submitting")
     _add_common_args(batch_parser)
 
+    # --- benchmark (unified enhanced benchmark) ---
+    bench_parser = subparsers.add_parser(
+        "benchmark",
+        help="Run unified enhanced benchmark (timing + quality) for all pipeline stages",
+    )
+    _add_input_args(bench_parser)
+    bench_parser.add_argument(
+        "--no-hand-pose", action="store_true", help="Skip HaMeR hand pose stage",
+    )
+    bench_parser.add_argument(
+        "--no-objects", action="store_true", help="Skip object detection stage",
+    )
+    bench_parser.add_argument(
+        "--no-segmentation", action="store_true", help="Skip segmentation stage",
+    )
+    bench_parser.add_argument(
+        "--no-scene-annotation", action="store_true", help="Skip scene annotation stage",
+    )
+    bench_parser.add_argument(
+        "--skip-stages", nargs="+", default=[],
+        help="Additional stage names to skip (e.g. sample_render lerobot_export)",
+    )
+    bench_parser.add_argument(
+        "--max-frames", type=int, default=900,
+        help="Max frames to process per video (default: 900 ≈ 30s)",
+    )
+    bench_parser.add_argument(
+        "--compare-previous", action="store_true",
+        help="Compare results with the most recent previous benchmark run",
+    )
+    _add_common_args(bench_parser)
+
     # --- estimate-cost ---
     cost_parser = subparsers.add_parser("estimate-cost", help="Estimate GCP processing cost")
     cost_parser.add_argument("--num-videos", type=int, required=True, help="Number of videos")
@@ -220,6 +252,81 @@ def main(argv: list[str] | None = None) -> None:
         exported = run_export(traj_data, config)
         for p in exported:
             print(f"  {p}")
+
+    elif args.command == "benchmark":
+        from .enhanced_benchmark import (
+            run_enhanced_benchmark,
+            save_enhanced_report,
+            format_enhanced_report,
+        )
+        from .benchmark_store import (
+            create_run_dir,
+            save_run_meta,
+            find_previous_run,
+            compare_benchmark_runs,
+        )
+
+        urls = _collect_urls(args)
+        if not urls:
+            parser.error("Provide URLs or local file paths via --urls or --url-file")
+
+        # Resolve local paths
+        video_paths: list[Path] = []
+        for u in urls:
+            p = Path(u)
+            if p.exists() and p.is_file():
+                video_paths.append(p)
+            else:
+                parser.error(f"Benchmark requires local files, not URLs: {u}")
+
+        # Build skip set from flags
+        skip_stages: set[str] = set(args.skip_stages)
+        if args.no_hand_pose:
+            skip_stages.add("hand_pose")
+        if args.no_objects:
+            skip_stages.add("object_detection")
+        if args.no_segmentation:
+            skip_stages.add("segmentation")
+        if args.no_scene_annotation:
+            skip_stages.add("scene_annotation")
+
+        # Apply max-frames via preprocessing
+        config.preprocessing.enabled = True
+        config.test_mode.enabled = True
+        config.test_mode.max_frames = args.max_frames
+
+        results = run_enhanced_benchmark(
+            config, video_paths,
+            skip_stages=skip_stages,
+            max_frames=args.max_frames,
+        )
+
+        # Save results
+        output_dir = config.resolve_path("data/benchmark")
+        run_dir = create_run_dir(config.base_dir, label="enhanced")
+        save_run_meta(run_dir, video_paths, run_type="enhanced")
+        json_path, txt_path = save_enhanced_report(results, output_dir, run_dir=run_dir)
+
+        print(f"\nResults saved:")
+        print(f"  JSON: {json_path}")
+        print(f"  Text: {txt_path}")
+
+        # Print report
+        print(format_enhanced_report(results))
+
+        # Compare with previous
+        if args.compare_previous:
+            runs_dir = run_dir.parent
+            prev_dir = find_previous_run(runs_dir, run_dir.name)
+            if prev_dir:
+                prev_json = prev_dir / "enhanced_benchmark.json"
+                if prev_json.exists():
+                    diff = compare_benchmark_runs(json_path, prev_json)
+                    print(diff)
+                else:
+                    print("Previous run has no enhanced_benchmark.json — skipping comparison")
+            else:
+                print("No previous run found for comparison")
 
     elif args.command == "run-enhanced":
         from .pipeline import run_pipeline_enhanced
