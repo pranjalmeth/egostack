@@ -54,3 +54,28 @@ lerobot:
   dataset_name: ego_hand_manipulation
   task_description: manipulation
   output_dir: data/lerobot
+
+# --- Preprocessing ---
+
+preprocessing:
+  enabled: true
+  target_width: 640               # 480p — ideal for robotics training data
+  target_height: 480              # balances accuracy vs processing speed
+  # target_fps: 30               # null = keep original fps
+  output_dir: data/preprocessed
+
+# --- Scene annotation ---
+
+scene_annotation:
+  enabled: true
+  sample_rate: 30                 # annotate every Nth frame (~1/sec at 30fps)
+  model_name: rule_based          # "blip2", "instructblip", or "rule_based"
+  output_dir: data/scene_annotations
+
+# --- Test / benchmark mode ---
+
+test_mode:
+  enabled: false
+  max_frames: 900                 # ~30 seconds at 30fps
+  render_samples: true            # generate annotated sample videos
+  sample_output_dir: data/samples

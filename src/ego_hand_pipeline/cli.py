@@ -25,6 +25,18 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_input_args(parser: argparse.ArgumentParser) -> None:
+    """Add input arguments that accept both URLs and local file paths."""
+    parser.add_argument(
+        "--urls", nargs="+",
+        help="YouTube video URLs or local file paths",
+    )
+    parser.add_argument(
+        "--url-file", type=str,
+        help="File with one URL/path per line",
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ego-hand-pipeline",
@@ -34,14 +46,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # --- run (full pipeline) ---
     run_parser = subparsers.add_parser("run", help="Run the full pipeline")
-    run_parser.add_argument("--urls", nargs="+", help="YouTube video URLs")
-    run_parser.add_argument("--url-file", type=str, help="File with one URL per line")
+    _add_input_args(run_parser)
     _add_common_args(run_parser)
 
     # --- download ---
     dl_parser = subparsers.add_parser("download", help="Download videos only")
-    dl_parser.add_argument("--urls", nargs="+", help="YouTube video URLs")
-    dl_parser.add_argument("--url-file", type=str, help="File with one URL per line")
+    _add_input_args(dl_parser)
     _add_common_args(dl_parser)
 
     # --- detect ---
@@ -69,15 +79,31 @@ def _build_parser() -> argparse.ArgumentParser:
         "run-enhanced",
         help="Run enhanced SOTA robotics pipeline (hand pose + objects + segmentation + LeRobot)",
     )
-    enh_parser.add_argument("--urls", nargs="+", help="YouTube video URLs")
-    enh_parser.add_argument("--url-file", type=str, help="File with one URL per line")
+    _add_input_args(enh_parser)
     enh_parser.add_argument("--no-hand-pose", action="store_true", help="Disable HaMeR 3D hand pose")
     enh_parser.add_argument("--no-objects", action="store_true", help="Disable GroundingDINO object detection")
     enh_parser.add_argument("--no-segmentation", action="store_true", help="Disable SAM2 segmentation")
+    enh_parser.add_argument("--no-scene-annotation", action="store_true", help="Disable scene captioning")
     enh_parser.add_argument(
         "--export-format", type=str, default="lerobot",
         choices=["lerobot", "json", "csv", "all"],
         help="Export format (default: lerobot)",
+    )
+    enh_parser.add_argument(
+        "--test-mode", action="store_true",
+        help="Enable test mode: process limited frames, render sample visualization videos",
+    )
+    enh_parser.add_argument(
+        "--max-frames", type=int, default=None,
+        help="Maximum frames to process per video (default: 900 in test mode, unlimited otherwise)",
+    )
+    enh_parser.add_argument(
+        "--resolution", type=str, default=None,
+        help="Processing resolution WxH (default: 640x480). Example: 1280x720",
+    )
+    enh_parser.add_argument(
+        "--no-preprocess", action="store_true",
+        help="Skip resolution preprocessing (use original video resolution)",
     )
     _add_common_args(enh_parser)
 
@@ -86,8 +112,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "cloud-batch",
         help="Submit a GCP Cloud Batch job to process videos at scale",
     )
-    batch_parser.add_argument("--urls", nargs="+", help="YouTube video URLs")
-    batch_parser.add_argument("--url-file", type=str, help="File with one URL per line")
+    _add_input_args(batch_parser)
     batch_parser.add_argument("--project-id", type=str, required=True, help="GCP project ID")
     batch_parser.add_argument("--bucket", type=str, required=True, help="GCS bucket name")
     batch_parser.add_argument("--region", type=str, default="us-central1", help="GCP region")
@@ -132,7 +157,7 @@ def main(argv: list[str] | None = None) -> None:
 
         urls = _collect_urls(args)
         if not urls:
-            parser.error("Provide URLs via --urls or --url-file")
+            parser.error("Provide URLs or local file paths via --urls or --url-file")
         run_pipeline(config, urls)
 
     elif args.command == "download":
@@ -196,19 +221,37 @@ def main(argv: list[str] | None = None) -> None:
         for p in exported:
             print(f"  {p}")
 
-
     elif args.command == "run-enhanced":
         from .pipeline import run_pipeline_enhanced
 
         urls = _collect_urls(args)
         if not urls:
-            parser.error("Provide URLs via --urls or --url-file")
+            parser.error("Provide URLs or local file paths via --urls or --url-file")
+
+        # Apply CLI overrides to config
+        if args.no_preprocess:
+            config.preprocessing.enabled = False
+
+        if args.resolution:
+            parts = args.resolution.lower().split("x")
+            if len(parts) == 2:
+                config.preprocessing.target_width = int(parts[0])
+                config.preprocessing.target_height = int(parts[1])
+                config.preprocessing.enabled = True
+
+        test_mode = args.test_mode
+        if args.max_frames is not None:
+            config.test_mode.max_frames = args.max_frames
+            test_mode = True
+
         run_pipeline_enhanced(
             config, urls,
             enable_hand_pose=not args.no_hand_pose,
             enable_object_detection=not args.no_objects,
             enable_segmentation=not args.no_segmentation,
+            enable_scene_annotation=not args.no_scene_annotation,
             export_format=args.export_format,
+            test_mode=test_mode,
         )
 
     elif args.command == "cloud-batch":
