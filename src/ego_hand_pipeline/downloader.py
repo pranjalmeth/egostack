@@ -45,7 +45,7 @@ def download_video(
                 final_path.append(Path(filepath))
 
     ydl_opts = {
-        "format": f"bestvideo[height<={resolution}][ext={format}]+bestaudio[ext=m4a]/best[height<={resolution}][ext={format}]/best[height<={resolution}]",
+        "format": f"bestvideo[height<={resolution}][ext={format}][vcodec!~='av0?1']+bestaudio[ext=m4a]/best[height<={resolution}][ext={format}][vcodec!~='av0?1']/best[height<={resolution}]",
         "merge_output_format": format,
         "outtmpl": str(output_dir / "%(title)s.%(ext)s"),
         "restrictfilenames": True,

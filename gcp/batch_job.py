@@ -197,12 +197,12 @@ def submit_batch_job(
             "Install with: pip install google-cloud-batch"
         )
 
+    from google.protobuf import json_format
+
     client = batch_v1.BatchServiceClient()
 
     job = batch_v1.Job()
-    job.task_groups = [batch_v1.TaskGroup(job_spec["taskGroups"][0])]
-    job.allocation_policy = batch_v1.AllocationPolicy(job_spec["allocationPolicy"])
-    job.logs_policy = batch_v1.LogsPolicy(job_spec["logsPolicy"])
+    json_format.ParseDict(job_spec, batch_v1.Job.pb(job))
 
     import uuid
     job_id = f"{config.job_name_prefix}-{uuid.uuid4().hex[:8]}"

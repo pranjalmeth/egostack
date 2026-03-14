@@ -27,12 +27,21 @@ LANDMARK_NAMES = [
     "PINKY_MCP", "PINKY_PIP", "PINKY_DIP", "PINKY_TIP",
 ]
 
-# Default model path relative to package root
-_DEFAULT_MODEL_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "models",
-    "hand_landmarker.task",
-)
+# Resolve model path: check env var, then common locations
+def _find_model_path() -> str:
+    if os.environ.get("HAND_LANDMARKER_MODEL"):
+        return os.environ["HAND_LANDMARKER_MODEL"]
+    candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "models", "hand_landmarker.task"),
+        "/app/models/hand_landmarker.task",
+        os.path.join(os.getcwd(), "models", "hand_landmarker.task"),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    return candidates[0]
+
+_DEFAULT_MODEL_PATH = _find_model_path()
 
 
 @dataclass

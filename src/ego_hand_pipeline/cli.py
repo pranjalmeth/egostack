@@ -177,12 +177,34 @@ def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    config_path = args.config
+    # estimate-cost doesn't need config
+    if args.command == "estimate-cost":
+        from gcp.batch_job import BatchJobConfig, estimate_cost
+
+        batch_config = BatchJobConfig(
+            project_id="estimate",
+            gpu_type=args.gpu_type,
+            max_concurrent_tasks=args.max_concurrent,
+            use_spot=not args.use_standard,
+        )
+
+        cost = estimate_cost(args.num_videos, batch_config)
+        print(f"\nCost Estimate for {cost['num_videos']} videos:")
+        print(f"  GPU: {cost['gpu_type']} ({'spot' if batch_config.use_spot else 'standard'})")
+        print(f"  Concurrent tasks: {cost['concurrent_tasks']}")
+        print(f"  Total GPU hours: {cost['total_gpu_hours']}")
+        print(f"  Wall clock time: {cost['wall_clock_hours']} hours")
+        print(f"  Compute cost: ${cost['compute_cost_usd']}")
+        print(f"  Storage cost: ${cost['storage_cost_usd_monthly']}/month")
+        print(f"  Total: ${cost['total_cost_usd']}")
+        return
+
+    config_path = getattr(args, "config", None)
     if config_path is None:
         default = Path("config.yaml")
         config_path = str(default) if default.exists() else None
 
-    config = load_config(config_path, overrides={"base_dir": args.base_dir})
+    config = load_config(config_path, overrides={"base_dir": getattr(args, "base_dir", ".")})
 
     if args.command == "run":
         from .pipeline import run_pipeline
@@ -384,25 +406,6 @@ def main(argv: list[str] | None = None) -> None:
         else:
             print(f"Job submitted: {result['job_name']}")
 
-    elif args.command == "estimate-cost":
-        from gcp.batch_job import BatchJobConfig, estimate_cost
-
-        batch_config = BatchJobConfig(
-            project_id="estimate",
-            gpu_type=args.gpu_type,
-            max_concurrent_tasks=args.max_concurrent,
-            use_spot=not args.use_standard,
-        )
-
-        cost = estimate_cost(args.num_videos, batch_config)
-        print(f"\nCost Estimate for {cost['num_videos']} videos:")
-        print(f"  GPU: {cost['gpu_type']} ({'spot' if batch_config.use_spot else 'standard'})")
-        print(f"  Concurrent tasks: {cost['concurrent_tasks']}")
-        print(f"  Total GPU hours: {cost['total_gpu_hours']}")
-        print(f"  Wall clock time: {cost['wall_clock_hours']} hours")
-        print(f"  Compute cost: ${cost['compute_cost_usd']}")
-        print(f"  Storage cost: ${cost['storage_cost_usd_monthly']}/month")
-        print(f"  Total: ${cost['total_cost_usd']}")
 
 
 if __name__ == "__main__":
